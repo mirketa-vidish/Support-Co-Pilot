@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+*.log
+!sample_cases/**/*.log
+chroma_db/
+project_data/
+case_data/

@@ -1,0 +1,28 @@
+"""Local, offline embedding model - no API key or network call needed at query time.
+
+The model weights are pulled from HuggingFace once (cached under ~/.cache) the
+first time this runs, then everything works fully offline.
+"""
+
+from sentence_transformers import SentenceTransformer
+
+from .config import settings
+
+_model: SentenceTransformer | None = None
+
+
+def get_model() -> SentenceTransformer:
+    global _model
+    if _model is None:
+        _model = SentenceTransformer(settings.embedding_model)
+    return _model
+
+
+def embed_texts(texts: list[str]) -> list[list[float]]:
+    if not texts:
+        return []
+    return get_model().encode(texts, normalize_embeddings=True).tolist()
+
+
+def embed_query(text: str) -> list[float]:
+    return embed_texts([text])[0]

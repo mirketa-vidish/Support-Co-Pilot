@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Elixir Support Triage</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <h1>Elixir Support Triage</h1>
+    </header>
+
+    <main class="app-main">
+      <!-- ============ PROJECTS (landing screen) ============ -->
+      <section id="view-projects" class="view active">
+        <div class="panel-header">
+          <h2>Projects</h2>
+          <button id="show-create-project" class="btn-primary">+ New Project</button>
+        </div>
+        <p class="hint">
+          One project per customer. Code and the implementation document live here, at the
+          project level, so every case inside a project always reasons against the same,
+          current code - never a stale or mismatched copy.
+        </p>
+        <div id="projects-empty" class="empty-state hidden">
+          No projects yet. Click <strong>+ New Project</strong> to create one.
+        </div>
+        <div id="projects-list" class="cases-grid"></div>
+
+        <div id="create-project-panel" class="panel hidden">
+          <h3>Create a new project</h3>
+          <form id="create-project-form" class="form" enctype="multipart/form-data">
+            <div class="form-row">
+              <label for="p-project-id">Project / customer name</label>
+              <input id="p-project-id" name="project_id" type="text" placeholder="e.g. Meridian Health Partners" required />
+            </div>
+            <div class="form-row">
+              <label for="p-code">SFDX project code (.zip, must contain package.xml)</label>
+              <input id="p-code" name="code_zip" type="file" accept=".zip" required />
+            </div>
+            <div class="form-row">
+              <label for="p-sdd">Implementation document / SDD (.docx) &mdash; optional</label>
+              <input id="p-sdd" name="sdd" type="file" accept=".docx" />
+            </div>
+            <div class="form-row-actions">
+              <button type="submit" class="btn-primary" id="create-project-submit">Create project</button>
+              <button type="button" class="btn-secondary" id="cancel-create-project">Cancel</button>
+            </div>
+          </form>
+          <div id="create-project-result" class="result-box hidden"></div>
+        </div>
+      </section>
+
+      <!-- ============ PROJECT WORKSPACE ============ -->
+      <section id="view-project" class="view">
+        <button id="back-to-projects" class="btn-secondary back-btn">&larr; All Projects</button>
+        <h2 id="project-title"></h2>
+
+        <nav class="tabs">
+          <button class="tab-btn active" data-ptab="overview">Overview</button>
+          <button class="tab-btn" data-ptab="cases">Cases</button>
+          <button class="tab-btn" data-ptab="new-case">New Case</button>
+          <button class="tab-btn" data-ptab="investigate">Investigate</button>
+        </nav>
+
+        <!-- Overview -->
+        <div id="ptab-overview" class="ptab active">
+          <div class="stat-row" id="project-stats"></div>
+
+          <div class="detail-section">
+            <div class="panel-header">
+              <h3>Code files</h3>
+              <button id="show-update-code" class="btn-secondary">Update code</button>
+            </div>
+            <div id="project-file-list" class="file-list"></div>
+            <div id="project-code-viewer" class="code-viewer hidden"></div>
+          </div>
+
+          <div id="update-code-panel" class="panel hidden">
+            <h4>Replace this project's code</h4>
+            <p class="hint">
+              This replaces the one current copy of the code every case in this project reasons
+              against. Use this once a fix has landed, so the agent stops looking at outdated code.
+            </p>
+            <form id="update-code-form" class="form" enctype="multipart/form-data">
+              <div class="form-row">
+                <label>New SFDX project code (.zip)</label>
+                <input name="code_zip" type="file" accept=".zip" required />
+              </div>
+              <div class="form-row form-row-checkbox">
+                <label><input name="confirm_override" type="checkbox" required />
+                  I understand this replaces the existing code and its embeddings</label>
+              </div>
+              <div class="form-row-actions">
+                <button type="submit" class="btn-primary">Replace code</button>
+                <button type="button" class="btn-secondary cancel-panel">Cancel</button>
+              </div>
+            </form>
+            <div class="result-box hidden"></div>
+          </div>
+
+          <div class="detail-section">
+            <div class="panel-header">
+              <h3>Implementation document (SDD)</h3>
+              <button id="show-update-sdd" class="btn-secondary">Update SDD</button>
+            </div>
+            <p id="sdd-status" class="hint"></p>
+          </div>
+
+          <div id="update-sdd-panel" class="panel hidden">
+            <h4>Replace this project's SDD</h4>
+            <form id="update-sdd-form" class="form" enctype="multipart/form-data">
+              <div class="form-row">
+                <label>New implementation document (.docx)</label>
+                <input name="sdd" type="file" accept=".docx" required />
+              </div>
+              <div class="form-row form-row-checkbox" id="sdd-override-row">
+                <label><input name="confirm_override" type="checkbox" />
+                  I understand this replaces the existing SDD and its embeddings</label>
+              </div>
+              <div class="form-row-actions">
+                <button type="submit" class="btn-primary">Save SDD</button>
+                <button type="button" class="btn-secondary cancel-panel">Cancel</button>
+              </div>
+            </form>
+            <div class="result-box hidden"></div>
+          </div>
+        </div>
+
+        <!-- Cases -->
+        <div id="ptab-cases" class="ptab">
+          <div id="cases-empty" class="empty-state hidden">
+            No cases yet. Go to <strong>New Case</strong> to add one.
+          </div>
+          <div id="cases-in-project-list" class="cases-grid"></div>
+          <div id="case-detail" class="case-detail hidden"></div>
+        </div>
+
+        <!-- New Case -->
+        <div id="ptab-new-case" class="ptab">
+          <h3>Create a new case</h3>
+          <p class="hint">
+            Code and the SDD already exist at the project level - just the case-specific inputs
+            are needed here.
+          </p>
+          <form id="new-case-form" class="form" enctype="multipart/form-data">
+            <div class="form-row">
+              <label for="c-case-id">Case ID</label>
+              <input id="c-case-id" name="case_id" type="text" placeholder="e.g. CASE-1001" required />
+            </div>
+            <div class="form-row">
+              <label for="c-log">FINEST debug log (.log) &mdash; required</label>
+              <input id="c-log" name="log" type="file" accept=".log,.txt" required />
+            </div>
+            <div class="form-row">
+              <label for="c-repro">Repro steps (.md / .txt) &mdash; optional</label>
+              <input id="c-repro" name="repro" type="file" accept=".md,.txt" />
+            </div>
+            <div class="form-row form-row-checkbox">
+              <label><input id="c-force" name="force" type="checkbox" /> Force re-ingest if case already exists</label>
+            </div>
+            <button type="submit" class="btn-primary" id="new-case-submit">Create case</button>
+          </form>
+          <div id="new-case-result" class="result-box hidden"></div>
+        </div>
+
+        <!-- Investigate -->
+        <div id="ptab-investigate" class="ptab">
+          <div class="investigate-layout">
+            <div class="case-picker">
+              <label for="chat-case-select">Case (optional, recommended)</label>
+              <select id="chat-case-select">
+                <option value="">&mdash; none, project-wide &mdash;</option>
+              </select>
+            </div>
+            <div id="chat-log" class="chat-log">
+              <div class="chat-empty">
+                Ask a question to start investigating, e.g.
+                &ldquo;Investigate this case and tell me the root cause.&rdquo;
+              </div>
+            </div>
+            <form id="chat-form" class="chat-input-row">
+              <textarea id="chat-question" rows="2"
+                placeholder="e.g. Investigate this case and tell me the root cause"></textarea>
+              <button type="submit" id="chat-send" class="btn-primary">Ask</button>
+            </form>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+59.0 APEX_CODE,FINEST;APEX_PROFILING,FINEST;CALLOUT,FINEST;DB,FINEST;SYSTEM,FINEST;VALIDATION,FINEST;VISUALFORCE,FINEST;WORKFLOW,FINEST
+Execute Anonymous: // Reproduction run for CASE-1001 - Meridian Health Partners - New Patient Intake, Insurance ID left blank
+15:42:09.001 (1000000)|EXECUTION_STARTED
+15:42:09.002 (2000000)|CODE_UNIT_STARTED|[EXTERNAL]|01p5g000000ABCD|PatientIntakeTrigger on Patient__c trigger event BeforeInsert for [new]
+15:42:09.005 (5000000)|VARIABLE_SCOPE_BEGIN|[3]|Trigger.new|List<Patient__c>|true|false
+15:42:09.006 (6000000)|STATEMENT_EXECUTE|[3]
+15:42:09.010 (10000000)|CODE_UNIT_STARTED|[EXTERNAL]|PatientIntakeTriggerHandler.handleBeforeInsert(List<Patient__c>)
+15:42:09.011 (11000000)|STATEMENT_EXECUTE|[5]
+15:42:09.012 (12000000)|VARIABLE_SCOPE_BEGIN|[5]|p|Patient__c|true|false
+15:42:09.015 (15000000)|STATEMENT_EXECUTE|[6]
+15:42:09.016 (16000000)|VARIABLE_ASSIGNMENT|[6]|insuranceId|null|0x1a2b3c
+15:42:09.017 (17000000)|USER_DEBUG|[7]|DEBUG|Processing new Patient intake, First Name=Jordan, Last Name=Alvarez, Insurance_Id__c=null (blank at intake - patient has no insurance on file yet, this is an expected walk-in scenario per SDD)
+15:42:09.020 (20000000)|STATEMENT_EXECUTE|[8]
+15:42:09.021 (21000000)|EXCEPTION_THROWN|[8]|System.NullPointerException: Attempt to de-reference a null object
+15:42:09.022 (22000000)|FATAL_ERROR|System.NullPointerException: Attempt to de-reference a null object: Class.PatientIntakeTriggerHandler.handleBeforeInsert: line 8, column 1
+15:42:09.023 (23000000)|CODE_UNIT_FINISHED|PatientIntakeTriggerHandler.handleBeforeInsert(List<Patient__c>)
+15:42:09.024 (24000000)|CUMULATIVE_LIMIT_USAGE
+15:42:09.024 (24000000)|LIMIT_USAGE_FOR_NS|(default)|
+  Number of SOQL queries: 0 out of 100
+  Number of query rows: 0 out of 50000
+  Number of SOSL queries: 0 out of 20
+  Number of DML statements: 0 out of 150
+  Number of DML rows: 0 out of 10000
+  Number of CPU time (ms): 42 out of 10000
+  Number of heap size (bytes): 184320 out of 6000000
+  Number of callouts: 0 out of 100
+  Number of email invocations: 0 out of 10
+  Number of future calls: 0 out of 50
+  Number of queueable jobs added to the queue: 0 out of 50
+15:42:09.025 (25000000)|CUMULATIVE_LIMIT_USAGE_END
+15:42:09.026 (26000000)|CODE_UNIT_FINISHED|PatientIntakeTrigger on Patient__c trigger event BeforeInsert for [new]
+15:42:09.027 (27000000)|EXECUTION_FINISHED
