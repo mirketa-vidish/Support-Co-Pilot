@@ -97,7 +97,18 @@ def upsert_chunks(
             meta["case_id"] = case_id
         metadatas.append(meta)
     embeddings = embed_texts(chunks)
-    collection.upsert(ids=ids, embeddings=embeddings, documents=chunks, metadatas=metadatas)
+
+    # Chroma rejects a single upsert() beyond its max batch size (a large debug log can
+    # easily produce more chunks than that in one file) - write in slices instead.
+    max_batch_size = _client.get_max_batch_size()
+    for start in range(0, len(chunks), max_batch_size):
+        end = start + max_batch_size
+        collection.upsert(
+            ids=ids[start:end],
+            embeddings=embeddings[start:end],
+            documents=chunks[start:end],
+            metadatas=metadatas[start:end],
+        )
     return len(chunks)
 
 

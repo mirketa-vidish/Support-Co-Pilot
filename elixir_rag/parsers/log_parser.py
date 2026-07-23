@@ -32,8 +32,8 @@ LIMIT_USAGE_BLOCK_PATTERN = re.compile(
 
 MAX_LINES_PER_CATEGORY = 25
 
-LOG_CHUNK_SIZE = 1500
-LOG_CHUNK_OVERLAP = 200
+LOG_CHUNK_SIZE = 3000
+LOG_CHUNK_OVERLAP = 300
 
 
 def chunk_debug_log(text: str) -> list[str]:

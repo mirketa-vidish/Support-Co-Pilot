@@ -20,7 +20,7 @@ get wrong.
 import json
 from typing import Callable, Optional
 
-from groq import Groq
+from groq import Groq, GroqError
 
 from . import tools
 from .config import settings
@@ -65,7 +65,14 @@ Always cite evidence (doc_type + source_file, or exact exception line) for every
 answer with: a one-line classification (Implementation Gap / Data Issue / Product Bug / Needs More \
 Info), the specific root cause, and a concrete recommended fix or next step."""
 
-MAX_TOOL_ROUNDS = 10
+MAX_TOOL_ROUNDS = 18
+
+# Groq's free/on-demand tier caps requests at 8000 tokens per minute for this model, and the
+# full conversation (system prompt + every prior tool result) is resent on every round - a
+# single get_file_content on a large class or a wide search_documents hit set can blow that
+# budget on its own, let alone accumulated over several rounds. Same fix as extract_log_signals
+# vs. a raw debug log: chunk/cap what actually reaches the model, never send the whole thing.
+MAX_TOOL_RESULT_CHARS = 3000
 
 # Schemas exposed to the LLM never include project_id - it is bound server-side in investigate().
 TOOL_SCHEMAS = [
@@ -174,6 +181,45 @@ def _client() -> Groq:
     return _groq_client
 
 
+def _truncate_for_model(result_text: str) -> str:
+    if len(result_text) <= MAX_TOOL_RESULT_CHARS:
+        return result_text
+    return (
+        result_text[:MAX_TOOL_RESULT_CHARS]
+        + f"\n...(truncated {len(result_text) - MAX_TOOL_RESULT_CHARS} more character(s) - "
+        "narrow your query, lower k, or ask for a specific portion if you need more)"
+    )
+
+
+# Per-result truncation alone isn't enough: the *entire* conversation (system prompt + every
+# prior tool result) is resent every round, so a harder-to-investigate project that takes many
+# rounds can still blow the 8000 TPM budget even with each individual result capped. Cap the
+# total payload too, shrinking the OLDEST tool results first - those are the least relevant to
+# whatever the model is reasoning about right now, so they're the safest to sacrifice detail on.
+MAX_CONVERSATION_CHARS = 16000
+TRIMMED_TOOL_RESULT_CHARS = 150
+
+
+def _trim_conversation_for_budget(messages: list[dict]) -> list[dict]:
+    total = sum(len(m.get("content") or "") for m in messages)
+    if total <= MAX_CONVERSATION_CHARS:
+        return messages
+
+    trimmed = list(messages)
+    for i, msg in enumerate(trimmed):
+        if total <= MAX_CONVERSATION_CHARS:
+            break
+        content = msg.get("content")
+        if msg.get("role") != "tool" or not content or len(content) <= TRIMMED_TOOL_RESULT_CHARS:
+            continue
+        total -= len(content) - TRIMMED_TOOL_RESULT_CHARS
+        trimmed[i] = {
+            **msg,
+            "content": content[:TRIMMED_TOOL_RESULT_CHARS] + "...(older result trimmed to fit the conversation budget - re-call this tool if you need it again)",
+        }
+    return trimmed
+
+
 def _build_dispatch(project_id: str, pinned_case_id: Optional[str]):
     """Bind project_id (and, if known, case_id) into closures the LLM can't override."""
 
@@ -258,12 +304,44 @@ def investigate(
     trace: list[dict] = []
 
     for round_num in range(1, max_rounds + 1):
-        response = _client().chat.completions.create(
-            model=settings.groq_model,
-            messages=messages,
-            tools=TOOL_SCHEMAS,
-            tool_choice="auto",
-        )
+        # On the last round, force a direct answer instead of another tool call - otherwise a
+        # case that never converges dead-ends with no synthesis at all, discarding whatever
+        # evidence was already gathered (e.g. extract_log_signals may have already surfaced the
+        # real exception on round 1, even if later rounds went looking for more).
+        is_final_round = round_num == max_rounds
+        call_messages = _trim_conversation_for_budget(messages)
+        if is_final_round:
+            call_messages = call_messages + [{
+                "role": "user",
+                "content": (
+                    "You've used all available tool calls. Answer now using only what you've "
+                    "already found. If the evidence is insufficient to fully classify the root "
+                    "cause, say so explicitly, classify as \"Needs More Info\", and list exactly "
+                    "what's missing and what to check next."
+                ),
+            }]
+
+        # tool_choice="none" still declares the tools and just asks the model not to use them -
+        # this model doesn't reliably honor that, and Groq hard-rejects the mismatch (400) rather
+        # than ignoring it. Omitting `tools` entirely on the final round leaves nothing callable,
+        # so there's no schema left for the model to (attempt to) call in the first place.
+        create_kwargs = {"model": settings.groq_model, "messages": call_messages}
+        if not is_final_round:
+            create_kwargs["tools"] = TOOL_SCHEMAS
+            create_kwargs["tool_choice"] = "auto"
+
+        try:
+            response = _client().chat.completions.create(**create_kwargs)
+        except GroqError as exc:
+            # Covers everything from a hallucinated/invalid tool call (400) to rate limits (429)
+            # to upstream outages (5xx) - any of these previously propagated as an unhandled
+            # exception all the way up to a bare, un-actionable HTTP 500 with no JSON body.
+            return {
+                "answer": None,
+                "trace": trace,
+                "rounds": round_num,
+                "error": f"Groq API error: {exc}",
+            }
         msg = response.choices[0].message
 
         if not msg.tool_calls:
@@ -303,7 +381,7 @@ def investigate(
                 "role": "tool",
                 "tool_call_id": tc.id,
                 "name": tc.function.name,
-                "content": result_text,
+                "content": _truncate_for_model(result_text),
             })
 
     return {
