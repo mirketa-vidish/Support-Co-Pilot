@@ -1,4 +1,4 @@
-"""FastAPI backend for the Elixir Support RAG web UI.
+"""FastAPI backend for the Support Co-pilot web UI.
 
 Project-first: code and the SDD live at the project (customer) level and are
 never re-uploaded per case, so the agent can never mix in another
@@ -47,7 +47,7 @@ from elixir_rag.vector_store import (  # noqa: E402
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
-app = FastAPI(title="Elixir Support RAG")
+app = FastAPI(title="Support Co-pilot")
 
 
 @app.middleware("http")

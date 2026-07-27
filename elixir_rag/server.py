@@ -25,5 +25,5 @@ get_file_content = mcp.tool()(tools.get_file_content)
 
 
 if __name__ == "__main__":
-    logging.getLogger("elixir_rag.server").info("Starting Elixir Support RAG MCP server")
+    logging.getLogger("elixir_rag.server").info("Starting Support Co-pilot MCP server")
     mcp.run()

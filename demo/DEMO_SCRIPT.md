@@ -1,4 +1,4 @@
-# Demo script — Elixir Support Triage
+# Demo script — Support Co-pilot
 
 Everything needed is in this `demo/` folder:
 

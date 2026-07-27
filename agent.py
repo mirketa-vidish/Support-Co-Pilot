@@ -68,7 +68,7 @@ def main():
         ask(" ".join(args.question), project_id, args.case_id)
         return
 
-    print("Elixir Support triage agent. Type a question, or 'exit' to quit.\n")
+    print("Support Co-pilot agent. Type a question, or 'exit' to quit.\n")
     project_id = args.project_id or _pick_project()
     if not project_id:
         return

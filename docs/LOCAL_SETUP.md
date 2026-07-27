@@ -1,4 +1,4 @@
-# Local Setup Guide — Elixir Support Triage
+# Local Setup Guide — Support Co-pilot
 
 For anyone setting this project up on their own machine to test it. About 10 minutes,
 including the one-time model download.

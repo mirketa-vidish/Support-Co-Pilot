@@ -1,4 +1,4 @@
-# Elixir Support Triage - RAG + LLM
+# Support Co-pilot - RAG + LLM
 
 An MCP server that turns a customer's Elixir implementation (SFDX code +
 Solution Design Document) plus each support case's inputs (repro steps,

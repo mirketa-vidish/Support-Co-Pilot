@@ -1,4 +1,4 @@
-# Implementation Guide — Elixir Support Triage
+# Implementation Guide — Support Co-pilot
 
 This document assumes **zero prior knowledge**. If you've never written Python, never used an
 API, never heard the word "embedding" — start at the top and read in order. Every later section
