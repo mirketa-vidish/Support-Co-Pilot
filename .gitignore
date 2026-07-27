@@ -4,6 +4,7 @@ __pycache__/
 .env
 *.log
 !sample_cases/**/*.log
+!demo/**/*.log
 chroma_db/
 project_data/
 case_data/

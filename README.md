@@ -7,6 +7,10 @@ FINEST debug log) into a searchable knowledge base, plus an LLM agent
 cause as an **Implementation Gap**, a **Data Issue**, or a genuine
 **Product Bug** in the Elixir package.
 
+> **New here?** [`docs/LOCAL_SETUP.md`](docs/LOCAL_SETUP.md) is a from-zero, copy-paste setup
+> guide. [`docs/IMPLEMENTATION_GUIDE.md`](docs/IMPLEMENTATION_GUIDE.md) explains how every part
+> of it works, assuming no prior knowledge. `demo/` has a ready-made example case to try first.
+
 ## Project / case model
 
 Two levels, and this split is deliberate:
