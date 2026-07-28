@@ -16,12 +16,12 @@ steps 1-5 for you — creates the virtual environment, installs dependencies, an
 Groq API key:
 
 ```powershell
-git clone https://github.com/VidishSharma1/Support-Co-Pilot.git
+git clone https://github.com/mirketa-vidish/Support-Co-Pilot.git
 cd Support-Co-Pilot
 .\setup.ps1
 ```
 ```bash
-git clone https://github.com/VidishSharma1/Support-Co-Pilot.git
+git clone https://github.com/mirketa-vidish/Support-Co-Pilot.git
 cd Support-Co-Pilot
 chmod +x setup.sh && ./setup.sh
 ```
@@ -48,7 +48,7 @@ on if you want to understand each piece, run the steps yourself, or troubleshoot
 ## Step 1 — Get the code
 
 ```powershell
-git clone https://github.com/VidishSharma1/Support-Co-Pilot.git
+git clone https://github.com/mirketa-vidish/Support-Co-Pilot.git
 cd Support-Co-Pilot
 ```
 
