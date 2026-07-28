@@ -9,6 +9,31 @@ same-data setup instead, that's a different (deployment) conversation, not this 
 
 ---
 
+## The fast way
+
+Once you have Python 3.10+ and Git installed (see Prerequisites below), this does everything in
+steps 1-5 for you — creates the virtual environment, installs dependencies, and prompts for your
+Groq API key:
+
+```powershell
+git clone https://github.com/VidishSharma1/Support-Co-Pilot.git
+cd Support-Co-Pilot
+.\setup.ps1
+```
+```bash
+git clone https://github.com/VidishSharma1/Support-Co-Pilot.git
+cd Support-Co-Pilot
+chmod +x setup.sh && ./setup.sh
+```
+
+It's safe to re-run any time — it skips whatever's already done (an existing `.venv`, an
+already-configured `.env`) instead of redoing it. It ends by offering to start the app for you.
+
+The rest of this guide walks through what that script is actually doing, one step at a time — read
+on if you want to understand each piece, run the steps yourself, or troubleshoot something.
+
+---
+
 ## Prerequisites
 
 - **Python 3.10 or newer** — check with `python --version`. ([python.org/downloads](https://www.python.org/downloads/))
@@ -101,6 +126,7 @@ a from-zero explanation of every file and concept in the project.
 
 | Problem | Fix |
 |---|---|
+| `.\setup.ps1 cannot be loaded because running scripts is disabled on this system` | Windows blocks local scripts by default. Run `Set-ExecutionPolicy -Scope Process RemoteSigned` in that same PowerShell window first (only affects the current window, not your whole machine), then try `.\setup.ps1` again. |
 | `RuntimeError: Missing required environment variable: GROQ_API_KEY` | `.env` doesn't exist yet, or is missing the key, or you're running the command from a different folder than the project root. |
 | Page won't load / connection refused | Give it the extra 10-20s on first startup. If it still fails, check the terminal running uvicorn for an actual error message. |
 | `[Errno 48] Address already in use` / port 8000 busy | Something else (maybe another instance of this app) is already using port 8000. Either stop that, or run this one on a different port: add `--port 8001` to the uvicorn command and use that URL instead. |
