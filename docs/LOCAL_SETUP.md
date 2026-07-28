@@ -117,9 +117,6 @@ The `demo/` folder has a ready-made example (a design doc, zipped SFDX code, rep
 debug log) with a full walkthrough in `demo/DEMO_SCRIPT.md` — follow that to create your first
 project and case, and see a real investigation run end to end.
 
-If you want to understand *how* any of it works under the hood, `docs/IMPLEMENTATION_GUIDE.md` is
-a from-zero explanation of every file and concept in the project.
-
 ---
 
 ## Troubleshooting

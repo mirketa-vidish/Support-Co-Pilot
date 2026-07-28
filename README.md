@@ -9,9 +9,7 @@ cause as an **Implementation Gap**, a **Data Issue**, or a genuine
 
 > **New here?** Clone this repo, then run `.\setup.ps1` (Windows) or `./setup.sh` (Mac/Linux) —
 > it handles the whole local setup for you. [`docs/LOCAL_SETUP.md`](docs/LOCAL_SETUP.md) covers
-> what it's doing and how to do it by hand. [`docs/IMPLEMENTATION_GUIDE.md`](docs/IMPLEMENTATION_GUIDE.md)
-> explains how every part of it works, assuming no prior knowledge. `demo/` has a ready-made
-> example case to try first.
+> what it's doing and how to do it by hand. `demo/` has a ready-made example case to try first.
 
 ## Project / case model
 

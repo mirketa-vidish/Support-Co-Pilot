@@ -89,9 +89,8 @@ different customer's code, since the project is bound in before the model ever s
 
 ## If something goes wrong live
 
-- **Investigation is slow / times out**: this is a known free-tier rate limit, not a bug — see
-  `docs/IMPLEMENTATION_GUIDE.md` §5.8 if asked for detail. Fall back to narrating what the trace
-  *would* show, or switch to showing the architecture diagram instead while it finishes in the
-  background.
+- **Investigation is slow / times out**: this is a known free-tier rate limit, not a bug. Fall
+  back to narrating what the trace *would* show, or switch to showing the architecture diagram
+  instead while it finishes in the background.
 - **"Project already exists" on step 2**: you rehearsed with the same name — pick a new one
   (`Meridian Health Partners (Demo 2)`, etc.) and retry.
