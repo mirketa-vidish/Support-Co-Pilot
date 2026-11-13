@@ -51,10 +51,24 @@ def _find_one(folder: str, patterns: list[str]) -> str | None:
 
 
 def _find_sfdx_root(folder: str) -> str | None:
-    for dirpath, _dirnames, filenames in os.walk(folder):
-        if "package.xml" in filenames:
+    """Locate the SFDX project root inside an uploaded folder.
+
+    A modern SFDX project marks its root with sfdx-project.json and keeps
+    package.xml under manifest/ - treating package.xml's own folder as the
+    root would index only manifest/ and silently skip all of force-app/.
+    So prefer sfdx-project.json, and if only package.xml is found inside a
+    manifest/ folder, step up to its parent.
+    """
+    package_xml_dir = None
+    for dirpath, dirnames, filenames in os.walk(folder):
+        dirnames[:] = [d for d in dirnames if d not in {".git", "node_modules", ".sf", ".sfdx"}]
+        if "sfdx-project.json" in filenames:
             return dirpath
-    return None
+        if package_xml_dir is None and "package.xml" in filenames:
+            package_xml_dir = dirpath
+    if package_xml_dir and os.path.basename(package_xml_dir).lower() == "manifest":
+        return os.path.dirname(package_xml_dir)
+    return package_xml_dir
 
 
 def _project_dir(project_id: str) -> str:
