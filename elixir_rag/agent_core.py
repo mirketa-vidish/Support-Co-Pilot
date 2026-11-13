@@ -220,6 +220,40 @@ def _trim_conversation_for_budget(messages: list[dict]) -> list[dict]:
     return trimmed
 
 
+FINAL_ANSWER_INSTRUCTION = (
+    "You've used all available tool calls - tools are no longer available, so do NOT call any "
+    "tool. Answer now in plain text using only the evidence above. If the evidence is "
+    "insufficient to fully classify the root cause, say so explicitly, classify as \"Needs More "
+    "Info\", and list exactly what's missing and what to check next."
+)
+
+
+def _flatten_for_final_answer(messages: list[dict]) -> list[dict]:
+    """Rewrite the tool-calling history as plain text for the tool-less final round.
+
+    Omitting `tools` alone isn't enough: with a long history of assistant tool_calls and
+    tool-role results, the model keeps pattern-matching into yet another tool call, and Groq
+    rejects that with a 400 "Tool choice is none, but model called a tool". Collapsing the
+    history into one plain user message leaves no tool-calling turn structure to imitate.
+    """
+    head = [m for m in messages[:2] if m["role"] in ("system", "user")]
+    evidence = []
+    for msg in messages[2:]:
+        if msg["role"] == "assistant":
+            if msg.get("content"):
+                evidence.append(f"Your earlier reasoning: {msg['content']}")
+            for tc in msg.get("tool_calls") or []:
+                fn = tc["function"]
+                evidence.append(f"Called {fn['name']}({fn['arguments']})")
+        elif msg["role"] == "tool":
+            evidence.append(f"Result of {msg.get('name', 'tool')}:\n{msg.get('content') or ''}")
+    evidence_text = "\n\n".join(evidence) if evidence else "(no evidence was gathered)"
+    return head + [{
+        "role": "user",
+        "content": f"Evidence gathered so far:\n\n{evidence_text}\n\n{FINAL_ANSWER_INSTRUCTION}",
+    }]
+
+
 def _build_dispatch(project_id: str, pinned_case_id: Optional[str]):
     """Bind project_id (and, if known, case_id) into closures the LLM can't override."""
 
@@ -310,28 +344,33 @@ def investigate(
         # real exception on round 1, even if later rounds went looking for more).
         is_final_round = round_num == max_rounds
         call_messages = _trim_conversation_for_budget(messages)
-        if is_final_round:
-            call_messages = call_messages + [{
-                "role": "user",
-                "content": (
-                    "You've used all available tool calls. Answer now using only what you've "
-                    "already found. If the evidence is insufficient to fully classify the root "
-                    "cause, say so explicitly, classify as \"Needs More Info\", and list exactly "
-                    "what's missing and what to check next."
-                ),
-            }]
 
-        # tool_choice="none" still declares the tools and just asks the model not to use them -
-        # this model doesn't reliably honor that, and Groq hard-rejects the mismatch (400) rather
-        # than ignoring it. Omitting `tools` entirely on the final round leaves nothing callable,
-        # so there's no schema left for the model to (attempt to) call in the first place.
-        create_kwargs = {"model": settings.groq_model, "messages": call_messages}
-        if not is_final_round:
+        # The final round sends no `tools` and a flattened, plain-text history (see
+        # _flatten_for_final_answer) - both are needed, since this model will still try to call
+        # a tool if it can see tool-calling turns, and Groq hard-rejects that with a 400.
+        create_kwargs = {"model": settings.groq_model}
+        if is_final_round:
+            create_kwargs["messages"] = _flatten_for_final_answer(call_messages)
+        else:
+            create_kwargs["messages"] = call_messages
             create_kwargs["tools"] = TOOL_SCHEMAS
             create_kwargs["tool_choice"] = "auto"
 
         try:
-            response = _client().chat.completions.create(**create_kwargs)
+            try:
+                response = _client().chat.completions.create(**create_kwargs)
+            except GroqError as exc:
+                # Last-resort retry: if the model still emits a tool call on the tool-less final
+                # round, ask once more, more bluntly, rather than discarding all gathered evidence.
+                if not (is_final_round and "tool_use_failed" in str(exc)):
+                    raise
+                retry_messages = create_kwargs["messages"] + [{
+                    "role": "user",
+                    "content": "Tool calls are disabled. Reply with your final written analysis only.",
+                }]
+                response = _client().chat.completions.create(
+                    model=settings.groq_model, messages=retry_messages
+                )
         except GroqError as exc:
             # Covers everything from a hallucinated/invalid tool call (400) to rate limits (429)
             # to upstream outages (5xx) - any of these previously propagated as an unhandled
