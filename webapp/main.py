@@ -12,8 +12,8 @@ that's enforced at the tool-dispatch layer, not just by convention here.
     POST /api/projects/{id}/sdd                replace project SDD (requires confirm_override once one exists)
     GET  /api/projects/{id}/file?path=...      fetch one source file's contents
     GET  /api/projects/{id}/cases              list cases within a project
-    POST /api/projects/{id}/cases              create a case (case_id + required log + optional repro)
-    GET  /api/projects/{id}/cases/{case_id}     case dashboard: log signals
+    POST /api/projects/{id}/cases              create a case (case_id + one or more logs + optional repro)
+    GET  /api/projects/{id}/cases/{case_id}     case dashboard: log signals (combined + per log)
     POST /api/chat                             investigate via the Groq agent, scoped to one project
 
 Run from the project root:
@@ -37,6 +37,7 @@ from starlette.datastructures import UploadFile as StarletteUploadFile  # noqa: 
 
 import ingest  # noqa: E402
 from elixir_rag import tools  # noqa: E402
+from elixir_rag.case_logs import is_log_file  # noqa: E402
 from elixir_rag.agent_core import investigate  # noqa: E402
 from elixir_rag.vector_store import (  # noqa: E402
     case_exists,
@@ -208,20 +209,29 @@ def create_case(
     case_id: str = Form(...),
     force: bool = Form(False),
     repro: Optional[UploadFile] = File(None),
-    log: UploadFile = File(...),
+    logs: list[UploadFile] = File(...),
 ):
     if not project_exists(project_id):
         raise HTTPException(404, f"No such project: {project_id}")
     case_id = case_id.strip()
     if not case_id:
         raise HTTPException(400, "case_id is required")
+    logs = [log for log in logs if _has_file(log)]
+    if not logs:
+        raise HTTPException(400, "At least one debug log is required")
+    bad = [log.filename for log in logs if not is_log_file(log.filename)]
+    if bad:
+        raise HTTPException(400, f"Debug logs must be .log files - not allowed: {', '.join(bad)}")
     if not force and case_exists(project_id, case_id):
         raise HTTPException(409, f"Case '{case_id}' already exists. Check 'force re-ingest' to overwrite.")
 
     tmp_dir = Path(tempfile.mkdtemp(prefix=f"case_{case_id}_"))
     try:
-        log_path = tmp_dir / "case.log"
-        _save_upload(log, log_path)
+        log_paths = []
+        for i, log in enumerate(logs):
+            log_path = tmp_dir / f"log_{i}.log"
+            _save_upload(log, log_path)
+            log_paths.append(str(log_path))
 
         repro_path = None
         if _has_file(repro):
@@ -231,9 +241,10 @@ def create_case(
 
         try:
             ingest.create_case(
-                project_id, case_id, str(log_path),
+                project_id, case_id, log_paths,
                 repro_path=str(repro_path) if repro_path else None,
                 force=force,
+                log_names=[log.filename for log in logs],
             )
         except ValueError as exc:
             raise HTTPException(409, str(exc))

@@ -151,8 +151,9 @@
               <input id="c-case-id" name="case_id" type="text" placeholder="e.g. CASE-1001" required />
             </div>
             <div class="form-row">
-              <label for="c-log">FINEST debug log (.log) &mdash; required</label>
-              <input id="c-log" name="log" type="file" accept=".log,.txt" required />
+              <label for="c-log">FINEST debug log(s) (.log) &mdash; at least one required</label>
+              <input id="c-log" name="logs" type="file" accept=".log" multiple required />
+              <p class="hint">Only .log files. Select several at once (Ctrl/Shift-click) to attach more than one log.</p>
             </div>
             <div class="form-row">
               <label for="c-repro">Repro steps (.md / .txt) &mdash; optional</label>

@@ -7,13 +7,14 @@ Two-level model:
     case, so the agent can never reason against a stale or wrong-customer
     copy of the code.
   - A **case** lives inside a project and only carries a case ID, optional
-    repro steps, and a required FINEST debug log.
+    repro steps, and one or more FINEST debug logs (at least one required).
 
 Usage:
     python ingest.py create-project --project-id "Acme Health" --sdd ./SDD.docx --code ./force-app
     python ingest.py update-project-code --project-id "Acme Health" --code ./force-app --confirm-override
     python ingest.py update-project-sdd --project-id "Acme Health" --sdd ./SDD.docx --confirm-override
     python ingest.py create-case --project-id "Acme Health" --case-id CASE-1001 --log ./debug.log --repro ./repro.md
+    python ingest.py create-case --project-id "Acme Health" --case-id CASE-1002 --log ./run1.log ./run2.log
 """
 
 import argparse
@@ -23,6 +24,7 @@ import os
 import shutil
 import sys
 
+from elixir_rag import case_logs
 from elixir_rag.parsers.code_parser import parse_sfdx_project
 from elixir_rag.parsers.docx_parser import parse_docx
 from elixir_rag.parsers.log_parser import chunk_debug_log
@@ -151,10 +153,25 @@ def create_project(project_id: str, sdd_path: str | None = None, sfdx_root: str 
 def create_case(
     project_id: str,
     case_id: str,
-    log_path: str,
+    log_paths: list[str] | str,
     repro_path: str | None = None,
     force: bool = False,
+    log_names: list[str] | None = None,
 ) -> int:
+    """Create a case from one or more FINEST debug logs (plus optional repro steps).
+
+    `log_names` optionally gives each log's original filename, for callers (like the web
+    upload) whose temp paths don't carry it; otherwise each path's own basename is used.
+    """
+    if isinstance(log_paths, str):
+        log_paths = [log_paths]
+    if not log_paths:
+        raise ValueError("At least one debug log is required.")
+    if log_names is not None and len(log_names) != len(log_paths):
+        raise ValueError("log_names must match log_paths one-to-one.")
+    bad = [n for n in (log_names or log_paths) if not case_logs.is_log_file(n)]
+    if bad:
+        raise ValueError(f"Debug logs must be .log files - not allowed: {', '.join(os.path.basename(b) for b in bad)}")
     if not project_exists(project_id):
         raise ValueError(f"No such project: '{project_id}'. Create it first.")
     if case_exists(project_id, case_id):
@@ -162,8 +179,12 @@ def create_case(
             raise ValueError(f"Case '{case_id}' already exists in project '{project_id}'. Use force to re-ingest.")
         delete_case(project_id, case_id)
 
-    case_dir = os.path.join(_project_dir(project_id), "cases", case_id)
-    os.makedirs(case_dir, exist_ok=True)
+    case_dir = case_logs.case_dir(project_id, case_id)
+    # Clear any previously stored logs too, or a forced re-ingest with fewer logs would
+    # leave stale ones on disk that extract_log_signals would still read.
+    shutil.rmtree(case_dir, ignore_errors=True)
+    logs_dir = case_logs.logs_dir(project_id, case_id)
+    os.makedirs(logs_dir, exist_ok=True)
 
     total = 0
     if repro_path:
@@ -173,12 +194,17 @@ def create_case(
     else:
         logger.info("No repro steps provided for case '%s' (optional).", case_id)
 
-    with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-        log_text = f.read()
-    chunks = chunk_debug_log(log_text)
-    total += upsert_chunks(project_id, "debug_log", os.path.basename(log_path), chunks, case_id=case_id)
-    shutil.copy(log_path, os.path.join(case_dir, "debug_log.log"))
-    logger.info("Debug log: %s -> %d chunk(s)", log_path, len(chunks))
+    taken: set[str] = set()
+    for i, log_path in enumerate(log_paths):
+        # Each log gets a unique name within the case: it's both the file on disk and the
+        # vector store's source_file, so two same-named uploads can't overwrite each other.
+        name = case_logs.safe_log_name(log_names[i] if log_names else log_path, taken)
+        with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+            log_text = f.read()
+        chunks = chunk_debug_log(log_text)
+        total += upsert_chunks(project_id, "debug_log", name, chunks, case_id=case_id)
+        shutil.copy(log_path, os.path.join(logs_dir, name))
+        logger.info("Debug log: %s -> %d chunk(s)", name, len(chunks))
 
     logger.info("Created case '%s' in project '%s': %d total chunk(s).", case_id, project_id, total)
     return total
@@ -227,7 +253,10 @@ def main():
     p_case = sub.add_parser("create-case", help="Create a case inside an existing project")
     p_case.add_argument("--project-id", required=True)
     p_case.add_argument("--case-id", required=True)
-    p_case.add_argument("--log", required=True, help="Path to the FINEST debug log.")
+    p_case.add_argument(
+        "--log", required=True, nargs="+", action="extend",
+        help="Path(s) to one or more FINEST debug .log files (space-separated, or repeat --log).",
+    )
     p_case.add_argument("--repro", help="Path to repro steps (.md/.txt). Optional.")
     p_case.add_argument("--force", action="store_true")
     p_case.set_defaults(func=_cmd_create_case)

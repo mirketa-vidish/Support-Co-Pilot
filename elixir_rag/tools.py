@@ -16,6 +16,8 @@ import logging
 import os
 from typing import Optional
 
+from .case_logs import list_case_logs
+from .parsers.log_parser import MAX_LINES_PER_CATEGORY
 from .parsers.log_parser import extract_log_signals as _extract_log_signals
 from .vector_store import list_cases_in_project as _list_cases_in_project
 from .vector_store import list_projects as _list_projects
@@ -87,30 +89,96 @@ def search_documents(
     return hits
 
 
-def extract_log_signals(project_id: str, case_id: str) -> dict:
-    """Extract the high-signal lines from one case's raw FINEST debug log.
+def _signals_for(path: str) -> dict:
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        return _extract_log_signals(f.read())
 
-    Purpose-built alternative to reading the raw log: pulls out exceptions,
+
+def _round_robin(per_log: list[tuple[str, list[str]]], cap: int) -> list[str]:
+    """Merge each log's lines, tagged with the log's name, taking one from each log in turn.
+
+    Round-robin rather than concatenation so a noisy first log can't use up the whole cap
+    and hide the exceptions in every other log.
+    """
+    out = []
+    depth = 0
+    while len(out) < cap and any(depth < len(lines) for _, lines in per_log):
+        for name, lines in per_log:
+            if depth < len(lines) and len(out) < cap:
+                out.append(f"[{name}] {lines[depth]}")
+        depth += 1
+    return out
+
+
+def extract_log_signals(project_id: str, case_id: str, log_file: Optional[str] = None) -> dict:
+    """Extract the high-signal lines from a case's raw FINEST debug log(s).
+
+    Purpose-built alternative to reading the raw logs: pulls out exceptions,
     fatal errors, DML/SOQL activity counts, sample USER_DEBUG lines, and the
     governor limit usage block. Always prefer this over search_documents for
-    "what went wrong" / "what error was thrown" questions - the raw log can
+    "what went wrong" / "what error was thrown" questions - a raw log can
     be tens of thousands of lines and dumping chunks of it wastes tokens and
     buries the signal.
+
+    A case can have several debug logs. Without `log_file`, a multi-log case
+    returns a combined summary: totals, a per-log breakdown, and exceptions /
+    fatal errors tagged with the log they came from. Pass `log_file` (a name
+    from that `logs` breakdown) for one log's full detail, including its
+    USER_DEBUG samples and governor limit usage.
 
     Args:
         project_id: The project the case belongs to.
         case_id: The case to extract signals from. Use list_cases if unknown.
+        log_file: Optional - one log's name, to get that log's full detail only.
     """
-    logger.info("TOOL extract_log_signals(project_id=%r, case_id=%r)", project_id, case_id)
-    log_path = os.path.join(PROJECT_DATA_DIR, project_id, "cases", case_id, "debug_log.log")
-    if not os.path.exists(log_path):
-        return {"error": f"No debug log found for case {case_id} in project {project_id}"}
-    with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-        text = f.read()
-    result = _extract_log_signals(text)
     logger.info(
-        "extract_log_signals -> %d exception(s), %d fatal error(s)",
-        len(result["exceptions"]), len(result["fatal_errors"]),
+        "TOOL extract_log_signals(project_id=%r, case_id=%r, log_file=%r)", project_id, case_id, log_file
+    )
+    logs = list_case_logs(project_id, case_id)
+    if not logs:
+        return {"error": f"No debug log found for case {case_id} in project {project_id}"}
+
+    if log_file:
+        match = [(n, p) for n, p in logs if n.lower() == log_file.strip().lower()]
+        if not match:
+            return {
+                "error": f"No debug log named '{log_file}' in case {case_id}",
+                "available_logs": [n for n, _ in logs],
+            }
+        logs = match
+
+    if len(logs) == 1:
+        name, path = logs[0]
+        result = {"log_count": 1, "log_file": name, **_signals_for(path)}
+    else:
+        per_log = [(name, _signals_for(path)) for name, path in logs]
+        result = {
+            "log_count": len(per_log),
+            "total_lines": sum(s["total_lines"] for _, s in per_log),
+            "dml_statement_count": sum(s["dml_statement_count"] for _, s in per_log),
+            "soql_query_count": sum(s["soql_query_count"] for _, s in per_log),
+            "logs": [
+                {
+                    "log_file": name,
+                    "total_lines": s["total_lines"],
+                    "exception_count": len(s["exceptions"]),
+                    "fatal_error_count": len(s["fatal_errors"]),
+                    "dml_statement_count": s["dml_statement_count"],
+                    "soql_query_count": s["soql_query_count"],
+                }
+                for name, s in per_log
+            ],
+            "exceptions": _round_robin([(n, s["exceptions"]) for n, s in per_log], MAX_LINES_PER_CATEGORY),
+            "fatal_errors": _round_robin([(n, s["fatal_errors"]) for n, s in per_log], MAX_LINES_PER_CATEGORY),
+            "note": (
+                "Combined summary across all of this case's debug logs. Call extract_log_signals "
+                "again with log_file=<name> for one log's USER_DEBUG samples and governor limit usage."
+            ),
+        }
+
+    logger.info(
+        "extract_log_signals -> %d log(s), %d exception(s), %d fatal error(s)",
+        result["log_count"], len(result["exceptions"]), len(result["fatal_errors"]),
     )
     return result
 

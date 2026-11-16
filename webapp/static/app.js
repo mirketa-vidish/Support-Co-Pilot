@@ -290,7 +290,10 @@ async function loadCaseDetail(caseId) {
       <div class="stat-tile"><div class="value">${s.dml_statement_count}</div><div class="label">DML statements</div></div>
       <div class="stat-tile"><div class="value">${s.soql_query_count}</div><div class="label">SOQL queries</div></div>
       <div class="stat-tile"><div class="value">${s.total_lines.toLocaleString()}</div><div class="label">Log lines</div></div>
+      ${s.log_count > 1 ? `<div class="stat-tile"><div class="value">${s.log_count}</div><div class="label">Debug logs</div></div>` : ""}
     </div>
+    ${s.log_count === 1 && s.log_file ? `<p class="hint">Debug log: ${escapeHtml(s.log_file)}</p>` : ""}
+    ${s.logs ? `<div class="detail-section"><h3>Debug logs</h3><div class="line-list">${s.logs.map((l) => `<div>${escapeHtml(l.log_file)} &mdash; ${l.total_lines.toLocaleString()} lines, ${l.exception_count} exception(s), ${l.fatal_error_count} fatal error(s), ${l.dml_statement_count} DML, ${l.soql_query_count} SOQL</div>`).join("")}</div></div>` : ""}
     ${s.exceptions.length ? `<div class="detail-section"><h3>Exceptions</h3><div class="line-list">${s.exceptions.map((l) => `<div>${escapeHtml(l)}</div>`).join("")}</div></div>` : ""}
     ${s.fatal_errors.length ? `<div class="detail-section"><h3>Fatal errors</h3><div class="line-list">${s.fatal_errors.map((l) => `<div>${escapeHtml(l)}</div>`).join("")}</div></div>` : ""}
   `
@@ -309,8 +312,36 @@ async function loadCaseDetail(caseId) {
   });
 }
 
+// Debug logs must be .log files. The `accept=".log"` attribute only pre-filters the file dialog -
+// the user can still switch it to "All files" or drag a file onto the input - so reject any other
+// file the moment it's selected, and re-check on submit. The server enforces the same rule.
+const caseLogInput = document.getElementById("c-log");
+
+function nonLogFiles(input) {
+  return Array.from(input.files).filter((f) => !f.name.toLowerCase().endsWith(".log"));
+}
+
+function rejectNonLogFiles(input) {
+  const bad = nonLogFiles(input);
+  if (!bad.length) return false;
+  input.value = "";
+  showResult(
+    document.getElementById("new-case-result"),
+    false,
+    `Only .log files are allowed. Not accepted: ${bad.map((f) => f.name).join(", ")}`,
+  );
+  return true;
+}
+
+caseLogInput.addEventListener("change", () => {
+  if (!rejectNonLogFiles(caseLogInput)) {
+    document.getElementById("new-case-result").classList.add("hidden");
+  }
+});
+
 document.getElementById("new-case-form").addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (rejectNonLogFiles(caseLogInput)) return;
   const form = e.target;
   const submitBtn = document.getElementById("new-case-submit");
   const resultBox = document.getElementById("new-case-result");

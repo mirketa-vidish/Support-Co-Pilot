@@ -40,8 +40,11 @@ you're investigating, call list_cases first.
 Investigation process:
 1. Call extract_log_signals(case_id) before anything else - it is a pre-aggregated summary of \
 exceptions, fatal errors, DML/SOQL activity, and governor limit usage pulled from the raw FINEST \
-debug log. Never try to read the raw log via search_documents first; the log can be tens of \
-thousands of lines and a purpose-built summary already exists.
+debug log(s). Never try to read the raw log via search_documents first; a log can be tens of \
+thousands of lines and a purpose-built summary already exists. A case may have several debug logs \
+(e.g. separate transactions or users): the combined summary tags each exception with its [log \
+name] - note whether a failure appears in every log or only some, and call \
+extract_log_signals(log_file=...) when you need one log's USER_DEBUG lines or governor limits.
 2. Use search_documents(doc_type="sdd") to find what the project's Solution Design Document says \
 the intended behavior/configuration should be.
 3. Use search_documents(doc_type="repro_steps") to confirm exactly how the issue was reproduced, \
@@ -125,8 +128,10 @@ TOOL_SCHEMAS = [
             "name": "extract_log_signals",
             "description": (
                 "Extract exceptions, fatal errors, DML/SOQL counts, and governor limit usage from "
-                "one case's raw FINEST debug log. Always prefer this over search_documents for "
-                "\"what went wrong\" questions."
+                "a case's raw FINEST debug log(s). A case may have several logs: without log_file "
+                "you get a combined summary with a per-log breakdown and each exception tagged "
+                "[log name]; pass log_file for one log's full detail (USER_DEBUG samples, governor "
+                "limits). Always prefer this over search_documents for \"what went wrong\" questions."
             ),
             "parameters": {
                 "type": "object",
@@ -135,6 +140,11 @@ TOOL_SCHEMAS = [
                         "type": "string",
                         "description": "The case to extract signals from. Omit to use the case "
                         "already established for this conversation, if any.",
+                    },
+                    "log_file": {
+                        "type": "string",
+                        "description": "Optional. One log's name (from the combined summary's "
+                        "`logs` list) to get only that log's full detail.",
                     },
                 },
             },
@@ -271,11 +281,11 @@ def _build_dispatch(project_id: str, pinned_case_id: Optional[str]):
             query, project_id=project_id, case_id=effective_case_id, doc_type=doc_type, k=k
         )
 
-    def _extract_log_signals(case_id: Optional[str] = None):
+    def _extract_log_signals(case_id: Optional[str] = None, log_file: Optional[str] = None):
         resolved = case_id or pinned_case_id
         if not resolved:
             return {"error": "No case_id given and none established yet - call list_cases first."}
-        return tools.extract_log_signals(project_id, resolved)
+        return tools.extract_log_signals(project_id, resolved, log_file=log_file)
 
     def _list_code_files():
         return tools.list_code_files(project_id)

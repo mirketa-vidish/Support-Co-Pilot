@@ -22,7 +22,7 @@ Two levels, and this split is deliberate:
   to which case, or reasoning against a stale copy from a case opened months
   ago.
 - **Case** (many per project): just a case ID, an optional repro-steps file,
-  and a required FINEST debug log. Every case under a project automatically
+  and one or more FINEST debug logs (at least one required). Every case under a project automatically
   shares that project's current code and SDD - nothing case-specific to
   upload for either.
 
@@ -59,7 +59,8 @@ elixir_rag/server.py (MCP server, stdio) also exposes the same tools for externa
 - `elixir_rag/vector_store.py` - persistent, project-scoped Chroma collection. `sdd`/`code`
   chunks are tagged with `project_id` only; `repro_steps`/`debug_log` chunks are additionally
   tagged with `case_id`. `project_data/<project_id>/code/` and
-  `project_data/<project_id>/cases/<case_id>/debug_log.log` hold the raw files on disk.
+  `project_data/<project_id>/cases/<case_id>/logs/` hold the raw files on disk (cases created
+  before multi-log support keep their single log at `cases/<case_id>/debug_log.log`).
 - `elixir_rag/tools.py` - the 6 tool implementations (`list_projects`, `list_cases`,
   `search_documents`, `extract_log_signals`, `list_code_files`, `get_file_content`), shared by
   the MCP server and any other in-process caller.
@@ -123,6 +124,9 @@ responsibility, so the base package is working exactly as designed.
     --repro sample_cases\CASE-1001\repro_steps.md
 ```
 
+`--log` takes several paths when a case has more than one debug log, e.g.
+`--log run1.log run2.log`.
+
 Once a fix lands and the code needs to change, replace it in place (this
 never touches existing cases' repro steps/logs):
 
@@ -167,7 +171,7 @@ Then open http://127.0.0.1:8000. The first screen is **Projects**:
     the old code's embeddings and re-ingests the new copy, so nothing case-specific is touched.
   - **Cases** - every case in this project, with a log-signal dashboard per case (exceptions,
     fatal errors, DML/SOQL counts) pulled straight from `extract_log_signals`.
-  - **New Case** - just a case ID, a required debug log, and optional repro steps. Code/SDD
+  - **New Case** - just a case ID, one or more debug logs, and optional repro steps. Code/SDD
     already exist at the project level.
   - **Investigate** - chat with the agent, scoped to this project. Optionally pin a case from
     the dropdown; each answer shows a collapsible trace of every tool call the agent made.
