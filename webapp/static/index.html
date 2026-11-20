@@ -170,12 +170,22 @@
         <!-- Investigate -->
         <div id="ptab-investigate" class="ptab">
           <div class="investigate-layout">
-            <div class="case-picker">
-              <label for="chat-case-select">Case (optional, recommended)</label>
-              <select id="chat-case-select">
-                <option value="">&mdash; none, project-wide &mdash;</option>
-              </select>
+            <div class="investigate-controls">
+              <div class="case-picker">
+                <label for="chat-case-select">Case (optional, recommended)</label>
+                <select id="chat-case-select">
+                  <option value="">&mdash; none, project-wide &mdash;</option>
+                </select>
+              </div>
+              <div class="model-field">
+                <label for="model-select">AI model</label>
+                <select id="model-select"
+                  title="Tried first for each investigation - if it fails, the other model takes over automatically">
+                  <option value="">Checking available models...</option>
+                </select>
+              </div>
             </div>
+            <div id="model-note" class="model-note hidden"></div>
             <div id="chat-log" class="chat-log">
               <div class="chat-empty">
                 Ask a question to start investigating, e.g.

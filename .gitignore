@@ -10,3 +10,4 @@ project_data/
 case_data/
 ~$*
 docs/IMPLEMENTATION_GUIDE.md
+llm_provider_state.json

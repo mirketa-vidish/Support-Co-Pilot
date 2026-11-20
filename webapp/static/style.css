@@ -12,6 +12,8 @@
   --success-bg: #f0fdf4;
   --code-bg: #0d1117;
   --code-text: #e6edf3;
+  --warning: #b45309;
+  --warning-bg: #fffbeb;
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.08);
 }
 
@@ -30,6 +32,8 @@
     --success-bg: #10230f;
     --code-bg: #0a0c10;
     --code-text: #d7dee6;
+    --warning: #fbbf24;
+    --warning-bg: #2a2110;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.4);
   }
 }
@@ -294,8 +298,40 @@ input[type=text], input[type=file] {
   gap: 12px;
 }
 
-.case-picker { display: flex; flex-direction: column; gap: 5px; max-width: 320px; }
+.investigate-controls { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; }
+
+.case-picker { display: flex; flex-direction: column; gap: 5px; max-width: 320px; flex: 1 1 220px; }
 .case-picker label { font-size: 0.85rem; color: var(--text-muted); }
+
+.model-field { display: flex; flex-direction: column; gap: 5px; flex: 1 1 260px; max-width: 380px; }
+.model-field label { font-size: 0.85rem; color: var(--text-muted); }
+.model-field select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.9rem;
+}
+.model-field select.fallback { border-color: var(--warning); }
+.model-field option:disabled { color: var(--text-muted); }
+
+.model-note,
+.msg-notice {
+  background: var(--warning-bg);
+  color: var(--warning);
+  border: 1px solid var(--warning);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+}
+.msg-notice { margin-bottom: 6px; }
+
+.msg-meta {
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
 .case-picker select {
   background: var(--surface);
   border: 1px solid var(--border);

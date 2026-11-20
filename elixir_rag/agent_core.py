@@ -1,4 +1,4 @@
-"""Reusable Groq tool-calling agent loop for support-case triage.
+"""Reusable tool-calling agent loop for support-case triage (Groq, with Gemini daily-limit failover).
 
 Calls the tool implementations in `elixir_rag/tools.py` directly (in-process)
 rather than through the MCP stdio transport - this module is the shared core
@@ -20,10 +20,8 @@ get wrong.
 import json
 from typing import Callable, Optional
 
-from groq import Groq, GroqError
-
+from . import llm_providers as llm
 from . import tools
-from .config import settings
 
 SYSTEM_PROMPT = """You are a senior Salesforce support engineer triaging issues for the Elixir \
 package (EHR and RCM modules). Every customer (project) runs a heavily customized implementation \
@@ -181,14 +179,58 @@ TOOL_SCHEMAS = [
     },
 ]
 
-_groq_client: Optional[Groq] = None
+def _create_completion(provider: "llm.Provider", messages: list[dict], is_final_round: bool):
+    """One chat-completion call against `provider`. Raises one of llm.LLM_ERRORS on failure."""
+    kwargs = {"model": provider.model, "messages": llm.messages_for(provider, messages)}
+    # The final round sends no `tools` and a flattened, plain-text history (see
+    # _flatten_for_final_answer) - both are needed, since the model will still try to call
+    # a tool if it can see tool-calling turns, and Groq hard-rejects that with a 400.
+    if not is_final_round:
+        kwargs["tools"] = TOOL_SCHEMAS
+        kwargs["tool_choice"] = "auto"
+    try:
+        return provider.client.chat.completions.create(**kwargs)
+    except llm.LLM_ERRORS as exc:
+        # Last-resort retry: if the model still emits a tool call on the tool-less final
+        # round, ask once more, more bluntly, rather than discarding all gathered evidence.
+        if not (is_final_round and "tool_use_failed" in str(exc)):
+            raise
+        kwargs["messages"] = kwargs["messages"] + [{
+            "role": "user",
+            "content": "Tool calls are disabled. Reply with your final written analysis only.",
+        }]
+        return provider.client.chat.completions.create(**kwargs)
 
 
-def _client() -> Groq:
-    global _groq_client
-    if _groq_client is None:
-        _groq_client = Groq(api_key=settings.groq_api_key)
-    return _groq_client
+def _all_failed_error(failures: dict[str, str], last_was_daily_limit: bool) -> str:
+    """Error shown when the failing provider has no working fallback left."""
+    if len(failures) == 1 and last_was_daily_limit:
+        return _no_provider_error(next(iter(failures.values())).split(":")[0])
+    details = " | ".join(failures.values())
+    if not llm.gemini_configured():
+        return f"{details}. (Add GEMINI_API_KEY to .env to fall back to Google Gemini automatically.)"
+    if len(failures) == 1:
+        # The other provider was never tried - say why it wasn't usable (bad key, daily limit...).
+        others = [
+            f"{r['label']}: {r['status']}"
+            for r in llm.provider_statuses()
+            if r["provider"] not in failures and not r["ready"]
+        ]
+        if others:
+            return f"{details}. No fallback available - {'; '.join(others)}."
+        return details
+    return f"Both AI models failed - {details}"
+
+
+def _no_provider_error(exhausted_label: str = "Groq") -> str:
+    if not llm.any_configured():
+        return "No AI API key is set - add GROQ_API_KEY and/or GEMINI_API_KEY to .env."
+    if not llm.gemini_configured():
+        return (
+            f"{exhausted_label} has reached its daily limit. Add GEMINI_API_KEY to .env to fall "
+            "back to Google Gemini automatically, or try again tomorrow."
+        )
+    return "Every configured AI model has reached its daily limit today - try again tomorrow."
 
 
 def _truncate_for_model(result_text: str) -> str:
@@ -308,16 +350,42 @@ def investigate(
     case_id: Optional[str] = None,
     max_rounds: int = MAX_TOOL_ROUNDS,
     on_tool_call: Optional[Callable[[str, dict, object], None]] = None,
+    preferred_provider: Optional[str] = None,
 ) -> dict:
     """Run the tool-calling investigation loop for one question, scoped to one project.
 
     Returns {"answer": str | None, "trace": [{"tool", "args", "result"}, ...],
-    "rounds": int, "error": str | None}. If `on_tool_call` is given, it's
+    "rounds": int, "error": str | None, "provider"/"provider_label"/"model": who
+    produced the answer, "notices": [str] (e.g. a daily-limit switch), and
+    "current_model": llm.current_model_info()}. If `on_tool_call` is given, it's
     invoked as (tool_name, args, result) right after each tool call resolves,
-    so a caller (e.g. a terminal REPL) can stream progress live.
+    so a caller (e.g. a terminal REPL) can stream progress live. `preferred_provider`
+    ("groq" / "gemini", from the UI's model picker) is tried first when it's ready;
+    otherwise the default (Groq if usable) is used, with a notice saying why.
     """
     if not project_id:
         raise ValueError("project_id is required")
+
+    provider, start_notice = llm.choose_provider(preferred_provider)
+    notices: list[str] = [start_notice] if start_notice else []
+    failures: dict[str, str] = {}  # provider name -> why it failed during this investigation
+
+    def _result(answer, rounds, error=None):
+        return {
+            "answer": answer,
+            "trace": trace,
+            "rounds": rounds,
+            "error": error,
+            "provider": provider.name if provider else None,
+            "provider_label": provider.label if provider else None,
+            "model": provider.model if provider else None,
+            "notices": notices,
+            "current_model": llm.current_model_info(),
+        }
+
+    trace: list[dict] = []
+    if provider is None:
+        return _result(None, 0, llm.current_model_info()["note"] or _no_provider_error())
 
     dispatch = _build_dispatch(project_id, case_id)
 
@@ -345,7 +413,6 @@ def investigate(
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
-    trace: list[dict] = []
 
     for round_num in range(1, max_rounds + 1):
         # On the last round, force a direct answer instead of another tool call - otherwise a
@@ -354,60 +421,55 @@ def investigate(
         # real exception on round 1, even if later rounds went looking for more).
         is_final_round = round_num == max_rounds
         call_messages = _trim_conversation_for_budget(messages)
-
-        # The final round sends no `tools` and a flattened, plain-text history (see
-        # _flatten_for_final_answer) - both are needed, since this model will still try to call
-        # a tool if it can see tool-calling turns, and Groq hard-rejects that with a 400.
-        create_kwargs = {"model": settings.groq_model}
         if is_final_round:
-            create_kwargs["messages"] = _flatten_for_final_answer(call_messages)
-        else:
-            create_kwargs["messages"] = call_messages
-            create_kwargs["tools"] = TOOL_SCHEMAS
-            create_kwargs["tool_choice"] = "auto"
+            call_messages = _flatten_for_final_answer(call_messages)
 
-        try:
+        # Any provider error (invalid key, rate limit, outage, timeout, rejected request) switches
+        # to the other provider and retries this same round - the conversation so far is plain
+        # OpenAI-format messages, so the other provider just continues the investigation rather
+        # than starting over. A daily limit also switches every later request for the rest of the
+        # day; any other error only for the rest of this investigation, so e.g. a fixed API key
+        # is picked up again on the very next one.
+        while True:
             try:
-                response = _client().chat.completions.create(**create_kwargs)
-            except GroqError as exc:
-                # Last-resort retry: if the model still emits a tool call on the tool-less final
-                # round, ask once more, more bluntly, rather than discarding all gathered evidence.
-                if not (is_final_round and "tool_use_failed" in str(exc)):
-                    raise
-                retry_messages = create_kwargs["messages"] + [{
-                    "role": "user",
-                    "content": "Tool calls are disabled. Reply with your final written analysis only.",
-                }]
-                response = _client().chat.completions.create(
-                    model=settings.groq_model, messages=retry_messages
+                response = _create_completion(provider, call_messages, is_final_round)
+                break
+            except llm.LLM_ERRORS as exc:
+                failed = provider
+                reason = llm.describe_error(exc)
+                failures[failed.name] = f"{failed.label}: {reason} - {exc}"
+                is_daily = llm.is_daily_limit_error(exc)
+                if is_daily:
+                    llm.mark_daily_limit_reached(failed)
+                elif llm.is_auth_error(exc):
+                    llm.record_key_problem(failed, reason)
+                provider = llm.active_provider(exclude=failures.keys())
+                if provider is None:
+                    provider = failed  # so the result still says which model failed
+                    return _result(None, round_num, _all_failed_error(failures, is_daily))
+                scope = "for the rest of today" if is_daily else "for this investigation"
+                notices.append(
+                    f"{failed.label} failed ({reason}) - switched to {provider.label} "
+                    f"({provider.model}) {scope}."
                 )
-        except GroqError as exc:
-            # Covers everything from a hallucinated/invalid tool call (400) to rate limits (429)
-            # to upstream outages (5xx) - any of these previously propagated as an unhandled
-            # exception all the way up to a bare, un-actionable HTTP 500 with no JSON body.
-            return {
-                "answer": None,
-                "trace": trace,
-                "rounds": round_num,
-                "error": f"Groq API error: {exc}",
-            }
         msg = response.choices[0].message
 
         if not msg.tool_calls:
-            return {"answer": msg.content, "trace": trace, "rounds": round_num, "error": None}
+            return _result(msg.content, round_num)
 
-        messages.append({
-            "role": "assistant",
-            "content": msg.content,
-            "tool_calls": [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-                }
-                for tc in msg.tool_calls
-            ],
-        })
+        tool_calls = []
+        for tc in msg.tool_calls:
+            tc_dict = {
+                "id": tc.id,
+                "type": "function",
+                "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+            }
+            # Gemini's thought signature - must be echoed back (see llm.messages_for).
+            extra_content = (getattr(tc, "model_extra", None) or {}).get("extra_content")
+            if extra_content:
+                tc_dict["extra_content"] = extra_content
+            tool_calls.append(tc_dict)
+        messages.append({"role": "assistant", "content": msg.content, "tool_calls": tool_calls})
 
         for tc in msg.tool_calls:
             args = json.loads(tc.function.arguments or "{}")
@@ -433,9 +495,4 @@ def investigate(
                 "content": _truncate_for_model(result_text),
             })
 
-    return {
-        "answer": None,
-        "trace": trace,
-        "rounds": max_rounds,
-        "error": "exceeded max tool-call rounds",
-    }
+    return _result(None, max_rounds, "exceeded max tool-call rounds")

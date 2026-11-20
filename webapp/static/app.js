@@ -54,6 +54,7 @@ function switchProjectTab(tab) {
   document.querySelectorAll("#view-project .ptab").forEach((s) => {
     s.classList.toggle("active", s.id === `ptab-${tab}`);
   });
+  if (tab === "investigate") loadCurrentModel();
 }
 
 document.querySelectorAll("#view-project .tab-btn").forEach((btn) => {
@@ -390,6 +391,71 @@ function renderChatCaseOptions() {
 const chatForm = document.getElementById("chat-form");
 const chatLog = document.getElementById("chat-log");
 
+// AI model picker. The server reports every provider with a live readiness status (API key
+// checked, daily limit not reached); unusable ones are listed but disabled with the reason.
+// The user's pick is kept while it stays ready; otherwise the server's default (Groq when its
+// key works) is selected. Whatever is picked is only tried first - if it fails mid-
+// investigation, the server still switches to the other model and says so in a notice.
+const modelSelect = document.getElementById("model-select");
+let userPickedProvider = null;
+
+modelSelect.addEventListener("change", () => {
+  userPickedProvider = modelSelect.value || null;
+});
+
+function renderCurrentModel(info) {
+  if (!info || !info.providers) return;
+  const note = document.getElementById("model-note");
+  modelSelect.innerHTML = "";
+  for (const p of info.providers) {
+    const opt = document.createElement("option");
+    opt.value = p.provider;
+    opt.disabled = !p.ready;
+    opt.textContent = `${p.label} · ${p.model}` + (p.ready ? "" : ` — ${p.status}`);
+    modelSelect.appendChild(opt);
+  }
+  const readyIds = info.providers.filter((p) => p.ready).map((p) => p.provider);
+  if (readyIds.length === 0) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "No AI model available";
+    modelSelect.insertBefore(opt, modelSelect.firstChild);
+    modelSelect.value = "";
+  } else {
+    modelSelect.value = readyIds.includes(userPickedProvider) ? userPickedProvider : info.default;
+  }
+  // Amber = the usual default (Groq) isn't usable right now - not merely "user chose Gemini".
+  modelSelect.classList.toggle("fallback", !readyIds.includes("groq"));
+  note.textContent = info.note || "";
+  note.classList.toggle("hidden", !info.note);
+}
+
+async function loadCurrentModel() {
+  try {
+    const res = await fetch("/api/model");
+    if (res.ok) renderCurrentModel(await res.json());
+  } catch (_) {
+    modelSelect.innerHTML = '<option value="">Unavailable (server not reachable)</option>';
+  }
+}
+
+function prependNotices(wrap, notices) {
+  for (const text of notices || []) {
+    const div = document.createElement("div");
+    div.className = "msg-notice";
+    div.textContent = `⚠ ${text}`;
+    wrap.insertBefore(div, wrap.firstChild);
+  }
+}
+
+function appendModelMeta(wrap, data) {
+  if (!data.provider_label) return;
+  const meta = document.createElement("div");
+  meta.className = "msg-meta";
+  meta.textContent = `${data.error ? "Error from" : "Response from"} ${data.provider_label} · ${data.model}`;
+  wrap.appendChild(meta);
+}
+
 function appendMessage(role, text, isError = false) {
   const empty = chatLog.querySelector(".chat-empty");
   if (empty) empty.remove();
@@ -445,7 +511,12 @@ chatForm.addEventListener("submit", async (e) => {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, project_id: state.currentProjectId, case_id: caseId }),
+      body: JSON.stringify({
+        question,
+        project_id: state.currentProjectId,
+        case_id: caseId,
+        provider: modelSelect.value || null,
+      }),
     });
     const data = await res.json();
     typing.remove();
@@ -454,12 +525,12 @@ chatForm.addEventListener("submit", async (e) => {
       appendMessage("assistant", data.detail || "Request failed.", true);
       return;
     }
-    if (data.error) {
-      const wrap = appendMessage("assistant", `[${data.error}]`, true);
-      appendTrace(wrap, data.trace);
-      return;
-    }
-    const wrap = appendMessage("assistant", data.answer || "(no answer)");
+    renderCurrentModel(data.current_model);
+    const wrap = data.error
+      ? appendMessage("assistant", `[${data.error}]`, true)
+      : appendMessage("assistant", data.answer || "(no answer)");
+    prependNotices(wrap, data.notices);
+    appendModelMeta(wrap, data);
     appendTrace(wrap, data.trace);
   } catch (err) {
     typing.remove();

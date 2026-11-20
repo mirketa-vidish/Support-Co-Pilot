@@ -14,7 +14,8 @@ that's enforced at the tool-dispatch layer, not just by convention here.
     GET  /api/projects/{id}/cases              list cases within a project
     POST /api/projects/{id}/cases              create a case (case_id + one or more logs + optional repro)
     GET  /api/projects/{id}/cases/{case_id}     case dashboard: log signals (combined + per log)
-    POST /api/chat                             investigate via the Groq agent, scoped to one project
+    GET  /api/model                            available AI models, each one's readiness, and the default
+    POST /api/chat                             investigate via the agent (Groq, Gemini fallback), scoped to one project
 
 Run from the project root:
     .venv\\Scripts\\python.exe -m uvicorn webapp.main:app --reload
@@ -39,6 +40,7 @@ import ingest  # noqa: E402
 from elixir_rag import tools  # noqa: E402
 from elixir_rag.case_logs import is_log_file  # noqa: E402
 from elixir_rag.agent_core import investigate  # noqa: E402
+from elixir_rag.llm_providers import PROVIDER_ORDER, current_model_info  # noqa: E402
 from elixir_rag.vector_store import (  # noqa: E402
     case_exists,
     list_cases_in_project,
@@ -64,6 +66,7 @@ class ChatRequest(BaseModel):
     question: str
     project_id: str
     case_id: Optional[str] = None
+    provider: Optional[str] = None  # "groq" / "gemini" from the model picker; None = default
 
 
 def _save_upload(upload: UploadFile, dest: Path) -> None:
@@ -257,13 +260,25 @@ def create_case(
 
 # ---------- Chat ----------
 
+@app.get("/api/model")
+def get_current_model():
+    return current_model_info()
+
+
 @app.post("/api/chat")
 def chat(req: ChatRequest):
     if not req.question or not req.question.strip():
         raise HTTPException(400, "question is required")
     if not project_exists(req.project_id):
         raise HTTPException(404, f"No such project: {req.project_id}")
-    return investigate(req.question, project_id=req.project_id, case_id=req.case_id or None)
+    if req.provider and req.provider not in PROVIDER_ORDER:
+        raise HTTPException(400, f"Unknown AI provider: {req.provider}")
+    return investigate(
+        req.question,
+        project_id=req.project_id,
+        case_id=req.case_id or None,
+        preferred_provider=req.provider or None,
+    )
 
 
 app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

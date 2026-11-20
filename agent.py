@@ -36,10 +36,14 @@ def _print_tool_call(name: str, args: dict, result) -> None:
 
 def ask(question: str, project_id: str, case_id: str | None) -> None:
     result = investigate(question, project_id=project_id, case_id=case_id, on_tool_call=_print_tool_call)
+    for notice in result.get("notices", []):
+        print(f"[notice: {notice}]")
     if result["error"]:
         print(f"[stopped: {result['error']}]")
     else:
         print(result["answer"])
+    if result.get("provider_label"):
+        print(f"\n(Response from {result['provider_label']} - {result['model']})")
 
 
 def _pick_project() -> str | None:
